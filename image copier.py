@@ -5,9 +5,9 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT as WDPA
 import os
 
 # === CONFIGURATION ===
-template_path = r"C:\Users\Tanveer\Python\Inventory Manager\Target Document.docx"
-source_folder = r"C:\Users\Tanveer\Pictures\Screenshots"
-output_file = "Photo_gallery.docx"
+template_path = r"" #insert template document path here
+source_folder = r"" #insert source image folder path here
+output_file = "Photo_gallery.docx" #output file
 images_per_page = 8
 images_per_row = 4
 image_width = Cm(5.85)

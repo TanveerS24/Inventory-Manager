@@ -7,8 +7,8 @@ from tkinter import messagebox, ttk
 # === CONFIGURATION ===
 HOST = "localhost"
 USER = "root"
-PASSWORD = "tanveer"
-DATABASE = "inventory"
+PASSWORD = "" #mysql password
+DATABASE = "" #Database name
 
 # === CONNECT TO DATABASE ===
 def connect_db():
