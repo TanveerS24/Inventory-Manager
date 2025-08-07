@@ -7,8 +7,8 @@ from tkinter import messagebox, ttk
 # === CONFIGURATION ===
 HOST = "localhost"
 USER = "root"
-PASSWORD = "" #mysql password
-DATABASE = "" #Database name
+PASSWORD = "tanveer"
+DATABASE = "inventory"
 
 # === CONNECT TO DATABASE ===
 def connect_db():
@@ -66,47 +66,54 @@ def add_record():
     messagebox.showinfo("Success", "Record added successfully!")
     fetch_all()
 
-# === EDIT RECORD ===
-def edit_record():
-    selected = tree.selection()
-    if not selected:
-        messagebox.showwarning("Select a record", "Please select a record to edit.")
-        return
+# === DELETE RECORD WITH CONFIRMATION ===
+def delete_record(record_id):
+    confirm = messagebox.askyesno("Confirm Delete", "Are you sure you want to delete this record?")
+    if confirm:
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM property_records WHERE id = %s", (record_id,))
+        conn.commit()
+        conn.close()
+        messagebox.showinfo("Deleted", "Record deleted successfully.")
+        fetch_all()
 
-    record_id = tree.item(selected[0])['values'][0]
-    column = combo_column.get()
-    new_value = entry_new_value.get()
+# === EDIT RECORD POPUP ===
+def open_edit_popup(record):
+    popup = tk.Toplevel(root)
+    popup.title("Edit Record")
 
-    if not column or not new_value:
-        messagebox.showwarning("Input Error", "Please select a column and enter a new value.")
-        return
+    fields = ["client", "clerk", "property_address", "inv_type", "status"]
+    entries = {}
 
-    conn = connect_db()
-    cursor = conn.cursor()
-    cursor.execute(f"UPDATE property_records SET {column} = %s WHERE id = %s", (new_value, record_id))
-    conn.commit()
-    conn.close()
-    messagebox.showinfo("Success", "Record updated.")
-    fetch_all()
+    for idx, field in enumerate(fields):
+        tk.Label(popup, text=field.capitalize()).grid(row=idx, column=0, padx=5, pady=5)
+        entry = tk.Entry(popup)
+        entry.grid(row=idx, column=1, padx=5, pady=5)
+        entries[field] = entry
 
-# === DELETE RECORD ===
-def delete_record():
-    selected = tree.selection()
-    if not selected:
-        messagebox.showwarning("Select a record", "Please select a record to delete.")
-        return
+    def save_changes():
+        updates = {}
+        for field, entry in entries.items():
+            value = entry.get().strip()
+            if value:
+                updates[field] = value
+        if updates:
+            conn = connect_db()
+            cursor = conn.cursor()
+            for col, val in updates.items():
+                cursor.execute(f"UPDATE property_records SET {col} = %s WHERE id = %s", (val, record[0]))
+            conn.commit()
+            conn.close()
+            messagebox.showinfo("Updated", "Record updated successfully.")
+            popup.destroy()
+            fetch_all()
+        else:
+            messagebox.showinfo("No Changes", "No values entered for update.")
 
-    record_id = tree.item(selected[0])['values'][0]
+    tk.Button(popup, text="Save", command=save_changes).grid(row=len(fields), column=0, columnspan=2, pady=10)
 
-    conn = connect_db()
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM property_records WHERE id = %s", (record_id,))
-    conn.commit()
-    conn.close()
-    messagebox.showinfo("Deleted", "Record deleted successfully.")
-    fetch_all()
-
-# === FETCH ALL RECORDS ===
+# === FETCH AND DISPLAY RECORDS ===
 def fetch_all():
     conn = connect_db()
     cursor = conn.cursor()
@@ -138,8 +145,30 @@ def search_records():
 def update_tree(rows):
     for row in tree.get_children():
         tree.delete(row)
+
     for row in rows:
         tree.insert("", tk.END, values=row)
+
+    reset_action_buttons()
+
+# === Handle Treeview Selection ===
+selected_record = None
+
+def on_row_select(event):
+    global selected_record
+    selected_item = tree.selection()
+    if selected_item:
+        selected_record = tree.item(selected_item[0])['values']
+        btn_edit.config(state="normal", command=lambda: open_edit_popup(selected_record))
+        btn_delete.config(state="normal", command=lambda: delete_record(selected_record[0]))
+    else:
+        reset_action_buttons()
+
+def reset_action_buttons():
+    global selected_record
+    selected_record = None
+    btn_edit.config(state="disabled", command=None)
+    btn_delete.config(state="disabled", command=None)
 
 # === GUI SETUP ===
 root = tk.Tk()
@@ -173,21 +202,6 @@ entry_status.grid(row=2, column=1)
 
 tk.Button(input_frame, text="Add Record", command=add_record).grid(row=2, column=3, padx=5, pady=5)
 
-# === Edit/Delete Frame ===
-edit_frame = tk.LabelFrame(root, text="Edit / Delete Record")
-edit_frame.pack(fill="x", padx=10, pady=5)
-
-tk.Label(edit_frame, text="Column").grid(row=0, column=0)
-combo_column = ttk.Combobox(edit_frame, values=["client", "clerk", "property_address", "inv_type", "status"])
-combo_column.grid(row=0, column=1)
-
-tk.Label(edit_frame, text="New Value").grid(row=0, column=2)
-entry_new_value = tk.Entry(edit_frame)
-entry_new_value.grid(row=0, column=3)
-
-tk.Button(edit_frame, text="Edit Record", command=edit_record).grid(row=0, column=4)
-tk.Button(edit_frame, text="Delete Record", command=delete_record).grid(row=0, column=5)
-
 # === Search Frame ===
 search_frame = tk.LabelFrame(root, text="Search Records")
 search_frame.pack(fill="x", padx=10, pady=5)
@@ -213,6 +227,18 @@ for col in tree["columns"]:
     tree.heading(col, text=col)
     tree.column(col, width=100)
 tree.pack(fill="both", expand=True, padx=10, pady=10)
+tree.bind("<<TreeviewSelect>>", on_row_select)
 
+# === Action Buttons ===
+action_frame = tk.LabelFrame(root, text="Selected Row Actions")
+action_frame.pack(fill="x", padx=10, pady=5)
+
+btn_edit = tk.Button(action_frame, text="Edit", state="disabled")
+btn_edit.pack(side="left", padx=10)
+
+btn_delete = tk.Button(action_frame, text="Delete", state="disabled")
+btn_delete.pack(side="left", padx=10)
+
+# === Initial Load ===
 fetch_all()
 root.mainloop()
