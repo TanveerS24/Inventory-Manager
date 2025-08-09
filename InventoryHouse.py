@@ -8,6 +8,7 @@ from docx.shared import Cm, Pt
 from docx.enum.section import WD_ORIENT as WDO
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT as WDPA
 import os
+import sys
 
 #print(os.path.join(os.path.dirname(mysql.connector.__file__), 'locales'))
 
@@ -30,7 +31,7 @@ def check_db():
             host='localhost',
             port=3306,
             user='root',
-            password=''
+            password='tanveer'
         )
 
         if connection and connection.is_connected():
@@ -183,7 +184,7 @@ def open_edit_popup(record):
     popup = tk.Toplevel(root)
     popup.title("Edit Record")
 
-    is_completed = record[7] == "completed"  # Status value is in column index 7
+    is_completed = record[7].strip().lower() == "completed"
 
     # Dropdown for Clerk
     tk.Label(popup, text="Clerk").grid(row=0, column=0, padx=5, pady=5)
@@ -211,7 +212,7 @@ def open_edit_popup(record):
 
     # Dropdown for Status
     tk.Label(popup, text="Status").grid(row=4, column=0, padx=5, pady=5)
-    status_cb = ttk.Combobox(popup, values=STATUS_OPTIONS + ["completed"], state="readonly" if not is_completed else "disabled")
+    status_cb = ttk.Combobox(popup, values=STATUS_OPTIONS, state="readonly" if not is_completed else "disabled")
     status_cb.set(record[7])
     status_cb.grid(row=4, column=1, padx=5, pady=5)
 
@@ -247,12 +248,21 @@ def paste_photos(record_id):
     if not source_folder:
         return
     try:
-        template_path = r""
-        output_file = "Photo_gallery.docx"
+        # === Determine save location ===
+        if getattr(sys, 'frozen', False):
+            # Running as compiled exe
+            base_path = os.path.dirname(sys.executable)
+        else:
+            # Running as .py script
+            base_path = os.path.dirname(os.path.abspath(__file__))
+
+        output_file = os.path.join(base_path, "Photo_gallery.docx")
+
+        template_path = r"Target Document.docx"
         images_per_page = 8
         images_per_row = 4
         image_width = Cm(5.85)
-        image_height = Cm(6.11)
+        image_height = Cm(6.2)
 
         doc = Document(template_path)
 
@@ -307,8 +317,8 @@ def paste_photos(record_id):
                 caption_cell = table.cell(row + 1, col)
                 caption_para = caption_cell.paragraphs[0]
                 caption_para.alignment = WDPA.CENTER
-                caption_para.paragraph_format.space_before = Pt(10)
-                caption_para.paragraph_format.space_after = Pt(10)
+                caption_para.paragraph_format.space_before = Pt(13)
+                caption_para.paragraph_format.space_after = Pt(13)
                 caption_run = caption_para.add_run(f"Photo {photo_counter:03d}")
                 caption_run.font.size = Pt(12)
 
@@ -321,11 +331,11 @@ def paste_photos(record_id):
 
         conn = connect_db()
         cursor = conn.cursor()
-        cursor.execute("UPDATE property_records SET status = %s WHERE id = %s", ("completed", record_id))
+        cursor.execute("UPDATE property_records SET status = %s WHERE id = %s", ("Completed", record_id))
         conn.commit()
         conn.close()
         fetch_all()
-        messagebox.showinfo("Success", "Photo document saved and status updated.")
+        messagebox.showinfo("Success", f"Photo document saved at:\n{output_file}\nStatus updated.")
     except Exception as e:
         messagebox.showerror("Error", str(e))
 
@@ -418,7 +428,7 @@ def on_row_select(event):
         btn_edit.config(state="normal", command=lambda: open_edit_popup(selected_record))
 
         # Disable Paste Photos if status is 'completed'
-        if selected_record[7] == "completed":
+        if selected_record[7] == "completed" or selected_record[7] == "Completed":
             btn_photos.config(state="disabled")
         else:
             btn_photos.config(state="normal", command=lambda: paste_photos(selected_record[1]))
