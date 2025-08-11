@@ -1,11 +1,15 @@
 # -*- mode: python ; coding: utf-8 -*-
+from PyInstaller.utils.hooks import collect_data_files
+
+datas = [('logo.png', '.'), ('Target Document.docx', '.')]
+datas += collect_data_files('docxcompose')
 
 
 a = Analysis(
     ['InventoryHouse.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:\\\\Users\\\\Tanveer\\\\AppData\\\\Roaming\\\\Python\\\\Python313\\\\site-packages\\\\mysql\\\\connector\\\\locales', 'mysql\\\\connector\\\\locales')],
+    datas=datas,
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
