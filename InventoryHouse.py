@@ -5,10 +5,17 @@ from tkinter import messagebox, ttk, filedialog
 from PIL import Image, ImageTk
 from docx import Document
 from docx.shared import Cm, Pt
+from docx.shared import Inches, Pt, Mm, RGBColor, Cm
 from docx.enum.section import WD_ORIENT as WDO
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT as WDPA
 from docx.enum.text import WD_BREAK
 from docxcompose.composer import Composer
+from lxml import etree
+from docx.enum.table import WD_TABLE_ALIGNMENT
+from docx.oxml.shared import OxmlElement, qn
+from docx.oxml import parse_xml
+from docx.oxml.ns import nsdecls
+import zipfile, shutil
 import os
 import subprocess, platform
 import sys
@@ -203,6 +210,114 @@ def open_edit_popup(record):
 
     tk.Button(popup, text="Save", command=save_changes).grid(row=5, columnspan=2, pady=10)
 
+def generate_template(address, client, date):
+    LOGO_PATH = os.path.join(BASE_PATH, "image 1.png")
+    output_file = os.path.join(BASE_PATH, "template.docx")
+
+    # Step 1: Build DOCX
+    doc = Document()
+    for section in doc.sections:
+        section.orientation = WDO.LANDSCAPE
+        section.page_width, section.page_height = Mm(297), Mm(210)
+        section.top_margin = Inches(1)
+        section.bottom_margin = Inches(1)
+        section.left_margin = Inches(1)
+        section.right_margin = Inches(1)
+
+    p = doc.add_paragraph()
+    p.alignment = WDPA.LEFT
+    p.add_run().add_picture(LOGO_PATH, width=Cm(12.38), height=Cm(2.9))
+
+    # Substituted placeholders
+    for text in [
+        f"Property Address: {address}",
+        f"On behalf of:     {client}",
+        f"Date:             {date}"
+    ]:
+        para = doc.add_paragraph(text)
+        para.runs[0].bold = True
+
+    ph = doc.add_paragraph("Additional Notes")
+    ph.runs[0].bold = True
+
+    tbl = doc.add_table(rows=1, cols=1)
+    tbl.alignment = WD_TABLE_ALIGNMENT.LEFT
+    tbl.columns[0].width = Cm(25.46)
+    tbl.rows[0].height = Cm(5.19)
+
+    tbl_el = tbl._tbl
+    tbl_pr = tbl_el.tblPr or OxmlElement('w:tblPr')
+    tbl_el.insert(0, tbl_pr)
+    tbl_borders = parse_xml(
+        r'<w:tblBorders %s>'
+        r'<w:top w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'<w:left w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'<w:bottom w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'<w:right w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'<w:insideH w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'<w:insideV w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'</w:tblBorders>' % nsdecls('w')
+    )
+    for old in tbl_pr.findall(qn('w:tblBorders')):
+        tbl_pr.remove(old)
+    tbl_pr.append(tbl_borders)
+
+    cell = tbl.rows[0].cells[0]
+    cell.paragraphs[0].text = "[NOTES_SDT_PARAGRAPH]"
+
+    # Footer info
+    doc.add_paragraph()
+    f1 = doc.add_paragraph()
+    run1 = f1.add_run("Inventory House ")
+    run1.font.color.rgb = RGBColor(255, 0, 0)
+    run1.font.size = Pt(12)
+    run1.bold = True
+    run2 = f1.add_run("T: 08700 336969 ")
+    run2.font.size = Pt(12)
+
+    email = "info@inventoryhouse.co.uk"
+    website = "www.inventoryhouse.co.uk"
+
+    def add_hyperlink(paragraph, url, text, color, bold, size):
+        part = paragraph.part
+        r_id = part.relate_to(
+            url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True
+        )
+        hyperlink = OxmlElement('w:hyperlink')
+        hyperlink.set(qn('r:id'), r_id)
+        new_run = OxmlElement('w:r')
+        rPr = OxmlElement('w:rPr')
+        if color:
+            c = OxmlElement('w:color')
+            c.set(qn('w:val'), '{:02X}{:02X}{:02X}'.format(color[0], color[1], color[2]))
+            rPr.append(c)
+        if bold:
+            rPr.append(OxmlElement('w:b'))
+        if size:
+            sz = OxmlElement('w:sz')
+            sz.set(qn('w:val'), str(int(size.pt * 2)))
+            rPr.append(sz)
+        new_run.append(rPr)
+        t = OxmlElement('w:t')
+        t.text = text
+        new_run.append(t)
+        hyperlink.append(new_run)
+        paragraph._p.append(hyperlink)
+
+    add_hyperlink(f1, f"mailto:{email}", email, RGBColor(0, 0, 255), False, Pt(12))
+    f1.add_run("  ")
+    add_hyperlink(f1, f"http://{website}", website, RGBColor(0, 0, 255), False, Pt(12))
+
+    f2 = doc.add_paragraph(
+        "Head Office: 3 County Gate London SE9 3UB.\n"
+        "Inventory House Limited. Registered in England & Wales Company No. 5250554"
+    )
+    f2.runs[0].font.size = Pt(12)
+    f2.runs[0].bold = True
+
+    doc.save(output_file)
+    return output_file
+
 # paste_photos() stays the same except DB update changes:
 def paste_photos(record_id):
     audio_transcription = filedialog.askopenfilename(title="Select audio transcribed Word file", filetypes=[
@@ -217,13 +332,21 @@ def paste_photos(record_id):
         return
     try:
         output_file = os.path.join(BASE_PATH, "Photo_gallery.docx")
-        template_path = os.path.join(BASE_PATH, "Target Document.docx")
+        # Get record info
+        conn = connect_db()
+        cursor = conn.cursor()
+        cursor.execute("SELECT property_address, client, date FROM property_records WHERE id = ?", (record_id,))
+        addr, client, date_val = cursor.fetchone()
+        conn.close()
+
+        template_path = generate_template(addr, client, date_val)
+        master = Document(template_path)
+
         images_per_page = 8
         images_per_row = 4
         image_width = Cm(5.85)
-        image_height = Cm(6.2)
+        image_height = Cm(6)
 
-        master = Document(template_path)
         master.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
         composer = Composer(master)
 
@@ -235,7 +358,7 @@ def paste_photos(record_id):
         composer.save(temp_merged_path)
 
         doc = Document(temp_merged_path)
-        doc.add_page_break()
+        #doc.add_page_break()
 
         image_files = sorted([
             f for f in os.listdir(source_folder)
@@ -244,11 +367,9 @@ def paste_photos(record_id):
 
         photo_counter = 1
         for start in range(0, len(image_files), images_per_page):
-            if start != 0:
-                doc.add_page_break()
             heading = doc.add_paragraph()
             heading.alignment = WDPA.LEFT
-            heading.paragraph_format.space_after = Pt(12)
+            heading.paragraph_format.space_after = Pt(8)
             heading_run = heading.add_run("PHOTO INDEX")
             heading_run.bold = True
             heading_run.font.size = Pt(20)
@@ -272,8 +393,8 @@ def paste_photos(record_id):
                 caption_cell = table.cell(row + 1, col)
                 caption_para = caption_cell.paragraphs[0]
                 caption_para.alignment = WDPA.CENTER
-                caption_para.paragraph_format.space_before = Pt(13)
-                caption_para.paragraph_format.space_after = Pt(13)
+                caption_para.paragraph_format.space_before = Pt(7)
+                caption_para.paragraph_format.space_after = Pt(7)
                 caption_run = caption_para.add_run(f"Photo {photo_counter:03d}")
                 caption_run.font.size = Pt(12)
                 photo_counter += 1
