@@ -331,7 +331,7 @@ def paste_photos(record_id):
         messagebox.showinfo("Invalid", "No such directory")
         return
     try:
-        output_file = os.path.join(BASE_PATH, "Photo_gallery.docx")
+        output_file = os.path.join(source_folder, "Photo_gallery.docx")
         # Get record info
         conn = connect_db()
         cursor = conn.cursor()
