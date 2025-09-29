@@ -15,7 +15,6 @@ from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.shared import OxmlElement, qn
 from docx.oxml import parse_xml
 from docx.oxml.ns import nsdecls
-import zipfile, shutil
 import os
 import subprocess, platform
 import sys
@@ -263,7 +262,7 @@ def generate_template(address, client, date):
     tbl_pr.append(tbl_borders)
 
     cell = tbl.rows[0].cells[0]
-    cell.paragraphs[0].text = "[NOTES_SDT_PARAGRAPH]"
+    cell.paragraphs[0].text = "Property Photos Link"
 
     # Footer info
     doc.add_paragraph()
