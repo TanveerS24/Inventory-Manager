@@ -1,5 +1,6 @@
 import sqlite3
 from datetime import datetime
+import time
 import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 from PIL import Image, ImageTk
@@ -19,6 +20,7 @@ from docx2pdf import convert
 from PyPDF2 import PdfMerger
 from pdf2docx import Converter
 from concurrent.futures import ThreadPoolExecutor
+import psutil
 import os
 import subprocess, platform
 import sys
@@ -341,10 +343,31 @@ def paste_photos(record_id):
         cursor.execute("SELECT property_address, client, date FROM property_records WHERE id = ?", (record_id,))
         addr, client, date_val = cursor.fetchone()
         conn.close()
+        
+        def threaded_convert(input_path, output_path):
+            def word_close(timeout=30):
+                for proc in psutil.process_iter(['pid', 'name']):
+                    if proc.info['name'] and 'WINWORD.EXE' in proc.info['name']:
+                        try:
+                            proc.terminate()
+                            proc.wait(timeout=timeout)
+                        except psutil.NoSuchProcess:
+                            pass
+                        except psutil.TimeoutExpired:
+                            proc.kill()
 
+            convert(input_path, output_path)
+            time.sleep(1)
+            word_close()
+
+        middle_pdf = "middle.pdf"
+        print("Converting Audio file to PDF...")
+        threaded_convert(audio_transcription, middle_pdf)
+        print("Generating template...")
         template_path = generate_template(addr, client, date_val)
         template_pdf = "template.pdf"
-        middle_pdf = "middle.pdf"
+        print("Converting template to PDF...")
+        threaded_convert(template_path, template_pdf)
         images_pdf = "images.pdf"
         merged_pdf = "merged.pdf"
 
@@ -418,13 +441,8 @@ def paste_photos(record_id):
         if os.path.exists(output_file):
             os.remove(output_file)
         
-        def threaded_convert(input_path, output_path):
-            with ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(convert, input_path, output_path)
-                future.result()  # wait for completion
 
-        threaded_convert(template_path, template_pdf)
-        threaded_convert(audio_transcription, middle_pdf)
+        print("Converting master document to PDF...")
         threaded_convert(master_doc_path, images_pdf)
 
         merger = PdfMerger()
@@ -440,12 +458,12 @@ def paste_photos(record_id):
         
         doc.save(output_file)
 
-        os.remove(template_pdf)
-        os.remove(middle_pdf)
-        os.remove(images_pdf)
-        os.remove(merged_pdf)
-        os.remove(master_doc_path)
-        os.remove(template_path)
+        # os.remove(template_pdf)
+        # os.remove(middle_pdf)
+        # os.remove(images_pdf)
+        # os.remove(merged_pdf)
+        # os.remove(master_doc_path)
+        # os.remove(template_path)
 
         conn = connect_db()
         cursor = conn.cursor()
