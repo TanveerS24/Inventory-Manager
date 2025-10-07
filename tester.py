@@ -5,31 +5,26 @@ import tkinter as tk
 from tkinter import messagebox, ttk, filedialog
 from PIL import Image, ImageTk
 from docx import Document
-from docx.shared import Cm, Pt
-from docx.shared import Inches, Pt, Mm, RGBColor, Cm
+from docx.shared import Cm, Pt, Inches, Mm, RGBColor
 from docx.enum.section import WD_ORIENT as WDO
 from docx.enum.text import WD_PARAGRAPH_ALIGNMENT as WDPA
 from docx.enum.text import WD_BREAK
-from docxcompose.composer import Composer
-from lxml import etree
 from docx.enum.table import WD_TABLE_ALIGNMENT
-from docx.oxml.shared import OxmlElement, qn
-from docx.oxml import parse_xml
-from docx.oxml.ns import nsdecls
+from docx.oxml import OxmlElement, parse_xml
+from docx.oxml.ns import nsdecls, qn
 from docx2pdf import convert
 from PyPDF2 import PdfMerger
 from pdf2docx import Converter
-from concurrent.futures import ThreadPoolExecutor
-import psutil
-import os
-import subprocess, platform
-import sys
+import os, sys, platform, subprocess, psutil, tempfile, shutil, traceback
 
-# === CONFIGURATION ===
+# ---------------- CONFIG ----------------
 CLERK_OPTIONS = ["Tom Tyrrel", "Kevin Crack", "Bill West"]
 STATUS_OPTIONS = ["Inspected", "Audio Recorded"]
+APP_BG = "#9ECAD6"
+ACTION_BG = "#DFF6FF"
+BTN_BG = "#748DAE"
+BTN_FG = "#2C3E50"
 
-# Determine base path (works for exe and script)
 if getattr(sys, 'frozen', False):
     BASE_PATH = os.path.dirname(sys.executable)
 else:
@@ -37,10 +32,9 @@ else:
 
 DB_PATH = os.path.join(BASE_PATH, "inventory.db")
 
-# === DATABASE FUNCTIONS (SQLite) ===
+# ---------------- Utilities ----------------
 def connect_db():
-    conn = sqlite3.connect(DB_PATH)
-    return conn
+    return sqlite3.connect(DB_PATH)
 
 def create_table():
     conn = connect_db()
@@ -59,7 +53,197 @@ def create_table():
     conn.commit()
     conn.close()
 
-# === APP FUNCTIONS ===
+def set_doc_landscape(doc: Document):
+    for section in doc.sections:
+        section.orientation = WDO.LANDSCAPE
+        section.page_width, section.page_height = Mm(297), Mm(210)
+        # reasonable margins
+        section.top_margin = Inches(0.5)
+        section.bottom_margin = Inches(0.5)
+        section.left_margin = Inches(0.5)
+        section.right_margin = Inches(0.5)
+
+def add_table_borders(table):
+    tbl_el = table._tbl
+    tbl_pr = tbl_el.tblPr or OxmlElement('w:tblPr')
+    tbl_el.insert(0, tbl_pr)
+    tbl_borders = parse_xml(
+        r'<w:tblBorders %s>'
+        r'<w:top w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'<w:left w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'<w:bottom w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'<w:right w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'<w:insideH w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'<w:insideV w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
+        r'</w:tblBorders>' % nsdecls('w')
+    )
+    for old in tbl_pr.findall(qn('w:tblBorders')):
+        tbl_pr.remove(old)
+    tbl_pr.append(tbl_borders)
+
+def safe_convert_docx_to_pdf(input_path, output_path):
+    """
+    Use docx2pdf.convert to convert a single file.
+    docx2pdf will call MS Word COM on Windows. We run sequentially and avoid forcing word termination.
+    """
+    try:
+        convert(input_path, output_path)  # docx2pdf handles same-path mapping
+    except Exception as e:
+        raise RuntimeError(f"docx->pdf conversion failed for {input_path}: {e}")
+
+def ensure_word_closed_gracefully(wait_seconds=2):
+    """
+    Optionally try to close any leftover WINWORD.EXE instances politely.
+    We avoid killing forcibly. This is only used sparingly.
+    """
+    if platform.system() != "Windows":
+        return
+    for proc in psutil.process_iter(['pid', 'name']):
+        try:
+            name = proc.info.get('name', '') or ''
+            if 'WINWORD.EXE' in name.upper():
+                try:
+                    proc.terminate()
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    # small wait
+    time.sleep(wait_seconds)
+
+# ---------------- Document Builders ----------------
+def generate_template_docx(address, client, date_str, logo_path=None, out_path=None):
+    """Create and return path to template DOCX (landscape)."""
+    if out_path is None:
+        out_path = os.path.join(tempfile.gettempdir(), f"template_{int(time.time())}.docx")
+    doc = Document()
+    set_doc_landscape(doc)
+
+    # logo
+    if logo_path and os.path.exists(logo_path):
+        p = doc.add_paragraph()
+        p.alignment = WDPA.LEFT
+        r = p.add_run()
+        r.add_picture(logo_path, width=Cm(12.38), height=Cm(2.9))
+
+    # placeholders
+    for text in [
+        f"Property Address: {address}",
+        f"On behalf of:     {client}",
+        f"Date:             {date_str}"
+    ]:
+        para = doc.add_paragraph(text)
+        para.runs[0].bold = True
+
+    doc.add_paragraph()
+    ph = doc.add_paragraph("Additional Notes")
+    ph.runs[0].bold = True
+
+    tbl = doc.add_table(rows=1, cols=1)
+    tbl.alignment = WD_TABLE_ALIGNMENT.LEFT
+    tbl.columns[0].width = Cm(25.46)
+    tbl.rows[0].height = Cm(5.19)
+    add_table_borders(tbl)
+    tbl.rows[0].cells[0].paragraphs[0].text = "Property Photos Link"
+
+    doc.add_paragraph()
+    f1 = doc.add_paragraph()
+    run1 = f1.add_run("Inventory House ")
+    run1.font.color.rgb = RGBColor(255, 0, 0)
+    run1.font.size = Pt(12)
+    run1.bold = True
+    run2 = f1.add_run("T: 08700 336969 ")
+    run2.font.size = Pt(12)
+
+    email = "info@inventoryhouse.co.uk"
+    website = "www.inventoryhouse.co.uk"
+    # add email / website plainly (hyperlink creation is more verbose; plain text is fine)
+    f1.add_run(f"  {email}  ")
+    f1.add_run(f"  {website}")
+
+    f2 = doc.add_paragraph(
+        "Head Office: 3 County Gate London SE9 3UB.\n"
+        "Inventory House Limited. Registered in England & Wales Company No. 5250554"
+    )
+    f2.runs[0].font.size = Pt(12)
+    f2.runs[0].bold = True
+
+    doc.save(out_path)
+    return out_path
+
+def force_docx_to_landscape_and_save(input_path, out_path=None):
+    """
+    Load a docx, force landscape orientation, save to out_path.
+    Returns out_path.
+    """
+    if out_path is None:
+        out_path = os.path.join(tempfile.gettempdir(), f"land_{int(time.time())}.docx")
+    doc = Document(input_path)
+    set_doc_landscape(doc)
+    doc.save(out_path)
+    return out_path
+
+def build_photo_index_docx(source_folder, out_path=None, images_per_page=8, images_per_row=4):
+    """
+    Creates a DOCX with images arranged in a grid and captions.
+    Ensures landscape sections.
+    Returns path to the generated DOCX.
+    """
+    if out_path is None:
+        out_path = os.path.join(tempfile.gettempdir(), f"photos_{int(time.time())}.docx")
+    image_files = sorted([f for f in os.listdir(source_folder) if f.lower().endswith(('.png', '.jpg', '.jpeg'))])
+    if not image_files:
+        raise ValueError("No image files found in selected folder.")
+
+    doc = Document()
+    set_doc_landscape(doc)
+
+    image_width = Cm(5.85)
+    image_height = Cm(6)
+    photo_counter = 1
+
+    for start in range(0, len(image_files), images_per_page):
+        heading = doc.add_paragraph()
+        heading.alignment = WDPA.LEFT
+        heading.paragraph_format.space_after = Pt(8)
+        heading_run = heading.add_run("PHOTO INDEX")
+        heading_run.bold = True
+        heading_run.font.size = Pt(20)
+
+        # create table with rows = images_per_row*2 (image row + caption row pairs) but we will create 'rows = images_per_page//images_per_row * 2'
+        rows_needed = (min(images_per_page, len(image_files) - start) + images_per_row - 1) // images_per_row
+        table = doc.add_table(rows=rows_needed * 2, cols=images_per_row)
+        table.autofit = True
+        add_table_borders(table)
+
+        for i in range(min(images_per_page, len(image_files) - start)):
+            global_index = start + i
+            row = (i // images_per_row) * 2
+            col = i % images_per_row
+            img_path = os.path.join(source_folder, image_files[global_index])
+
+            img_cell = table.cell(row, col)
+            img_para = img_cell.paragraphs[0]
+            img_para.paragraph_format.space_after = Pt(0)
+            img_para.alignment = WDPA.CENTER
+            run = img_para.add_run()
+            run.add_picture(img_path, width=image_width, height=image_height)
+
+            cap_cell = table.cell(row + 1, col)
+            cap_para = cap_cell.paragraphs[0]
+            cap_para.alignment = WDPA.CENTER
+            cap_para.paragraph_format.space_before = Pt(7)
+            cap_run = cap_para.add_run(f"Photo {photo_counter:03d}")
+            cap_run.font.size = Pt(12)
+            photo_counter += 1
+
+        # page break after each page block (except maybe last)
+        doc.add_page_break()
+
+    doc.save(out_path)
+    return out_path
+
+# ---------------- GUI / App Functions ----------------
 def add_record_popup():
     popup = tk.Toplevel(root)
     popup.title("Add New Record")
@@ -215,288 +399,122 @@ def open_edit_popup(record):
 
     tk.Button(popup, text="Save", command=save_changes).grid(row=5, columnspan=2, pady=10)
 
-def generate_template(address, client, date):
-    LOGO_PATH = os.path.join(BASE_PATH, "image 1.png")
-    output_file = os.path.join(BASE_PATH, "template.docx")
-
-    # Step 1: Build DOCX
-    doc = Document()
-    for section in doc.sections:
-        section.orientation = WDO.LANDSCAPE
-        section.page_width, section.page_height = Mm(297), Mm(210)
-        section.top_margin = Inches(1)
-        section.bottom_margin = Inches(1)
-        section.left_margin = Inches(1)
-        section.right_margin = Inches(1)
-
-    p = doc.add_paragraph()
-    p.alignment = WDPA.LEFT
-    p.add_run().add_picture(LOGO_PATH, width=Cm(12.38), height=Cm(2.9))
-
-    # Substituted placeholders
-    for text in [
-        f"Property Address: {address}",
-        f"On behalf of:     {client}",
-        f"Date:             {date}"
-    ]:
-        para = doc.add_paragraph(text)
-        para.runs[0].bold = True
-
-    ph = doc.add_paragraph("Additional Notes")
-    ph.runs[0].bold = True
-
-    tbl = doc.add_table(rows=1, cols=1)
-    tbl.alignment = WD_TABLE_ALIGNMENT.LEFT
-    tbl.columns[0].width = Cm(25.46)
-    tbl.rows[0].height = Cm(5.19)
-
-    tbl_el = tbl._tbl
-    tbl_pr = tbl_el.tblPr or OxmlElement('w:tblPr')
-    tbl_el.insert(0, tbl_pr)
-    tbl_borders = parse_xml(
-        r'<w:tblBorders %s>'
-        r'<w:top w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
-        r'<w:left w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
-        r'<w:bottom w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
-        r'<w:right w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
-        r'<w:insideH w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
-        r'<w:insideV w:val="single" w:sz="12" w:space="0" w:color="auto"/>'
-        r'</w:tblBorders>' % nsdecls('w')
-    )
-    for old in tbl_pr.findall(qn('w:tblBorders')):
-        tbl_pr.remove(old)
-    tbl_pr.append(tbl_borders)
-
-    cell = tbl.rows[0].cells[0]
-    cell.paragraphs[0].text = "Property Photos Link"
-
-    # Footer info
-    doc.add_paragraph()
-    f1 = doc.add_paragraph()
-    run1 = f1.add_run("Inventory House ")
-    run1.font.color.rgb = RGBColor(255, 0, 0)
-    run1.font.size = Pt(12)
-    run1.bold = True
-    run2 = f1.add_run("T: 08700 336969 ")
-    run2.font.size = Pt(12)
-
-    email = "info@inventoryhouse.co.uk"
-    website = "www.inventoryhouse.co.uk"
-
-    def add_hyperlink(paragraph, url, text, color, bold, size):
-        part = paragraph.part
-        r_id = part.relate_to(
-            url, "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink", is_external=True
-        )
-        hyperlink = OxmlElement('w:hyperlink')
-        hyperlink.set(qn('r:id'), r_id)
-        new_run = OxmlElement('w:r')
-        rPr = OxmlElement('w:rPr')
-        if color:
-            c = OxmlElement('w:color')
-            c.set(qn('w:val'), '{:02X}{:02X}{:02X}'.format(color[0], color[1], color[2]))
-            rPr.append(c)
-        if bold:
-            rPr.append(OxmlElement('w:b'))
-        if size:
-            sz = OxmlElement('w:sz')
-            sz.set(qn('w:val'), str(int(size.pt * 2)))
-            rPr.append(sz)
-        new_run.append(rPr)
-        t = OxmlElement('w:t')
-        t.text = text
-        new_run.append(t)
-        hyperlink.append(new_run)
-        paragraph._p.append(hyperlink)
-
-    add_hyperlink(f1, f"mailto:{email}", email, RGBColor(0, 0, 255), False, Pt(12))
-    f1.add_run("  ")
-    add_hyperlink(f1, f"http://{website}", website, RGBColor(0, 0, 255), False, Pt(12))
-
-    f2 = doc.add_paragraph(
-        "Head Office: 3 County Gate London SE9 3UB.\n"
-        "Inventory House Limited. Registered in England & Wales Company No. 5250554"
-    )
-    f2.runs[0].font.size = Pt(12)
-    f2.runs[0].bold = True
-
-    doc.save(output_file)
-    return output_file
-
-# paste_photos() stays the same except DB update changes:
+# ---------------- Paste Photos Workflow ----------------
 def paste_photos(record_id):
-    audio_transcription = filedialog.askopenfilename(title="Select audio transcribed Word file", filetypes=[
-        ("Word Documents", "*.docx;*.doc"),
-        ("All Files", "*.*")])
-    if not audio_transcription:
-        messagebox.showinfo("Invalid", "Choose a file of format .doc, .docx")
-        return
-    source_folder = filedialog.askdirectory(title="Select Image Folder")
-    if not source_folder:
-        messagebox.showinfo("Invalid", "No such directory")
-        return
+    """
+    Full workflow:
+    1. Ask for middle doc -> force landscape and convert to PDF
+    2. Generate template docx -> convert to PDF
+    3. Ask for image folder -> create photo index docx -> convert to PDF
+    4. Merge PDFs in order (template, middle, images)
+    5. Convert final merged PDF to DOCX
+    6. Update DB status to Completed and open final files
+    """
     try:
-        output_file = os.path.join(source_folder, "Photo_gallery.docx")
-        # Get record info
+        # 1) Middle doc selection & immediate conversion
+        middle_doc = filedialog.askopenfilename(title="Select middle Word file (audio transcribed doc)",
+                                                filetypes=[("Word Documents", "*.docx;*.doc"), ("All Files", "*.*")])
+        if not middle_doc:
+            messagebox.showinfo("Cancelled", "No middle document selected.")
+            return
+
+        # force landscape and save a temp copy
+        middle_land_doc = os.path.join(tempfile.gettempdir(), f"middle_land_{int(time.time())}.docx")
+        force_docx_to_landscape_and_save(middle_doc, middle_land_doc)
+        middle_pdf = os.path.join(tempfile.gettempdir(), f"middle_{int(time.time())}.pdf")
+
+        # convert middle docx -> pdf (sequential)
+        safe_convert_docx_to_pdf(middle_land_doc, middle_pdf)
+
+        # 2) generate template from DB record info and convert
         conn = connect_db()
         cursor = conn.cursor()
         cursor.execute("SELECT property_address, client, date FROM property_records WHERE id = ?", (record_id,))
-        addr, client, date_val = cursor.fetchone()
+        res = cursor.fetchone()
         conn.close()
-        
-        def threaded_convert(input_path, output_path):
-            def word_close(timeout=30):
-                for proc in psutil.process_iter(['pid', 'name']):
-                    if proc.info['name'] and 'WINWORD.EXE' in proc.info['name']:
-                        try:
-                            proc.terminate()
-                            proc.wait(timeout=timeout)
-                        except psutil.NoSuchProcess:
-                            pass
-                        except psutil.TimeoutExpired:
-                            proc.kill()
+        if not res:
+            messagebox.showerror("Error", "Record not found in database.")
+            return
+        addr, client, date_val = res
+        # date_val should be YYYY-MM-DD in DB; keep displayed date in dd-mm-YYYY for template
+        try:
+            display_date = datetime.strptime(date_val, "%Y-%m-%d").strftime("%d-%m-%Y")
+        except Exception:
+            display_date = date_val
 
-            convert(input_path, output_path)
-            time.sleep(1)
-            word_close()
+        logo = os.path.join(BASE_PATH, "image 1.png")
+        template_doc = generate_template_docx(addr, client, display_date, logo_path=logo)
+        template_land_doc = template_doc  # already landscape in generator
+        template_pdf = os.path.join(tempfile.gettempdir(), f"template_{int(time.time())}.pdf")
+        safe_convert_docx_to_pdf(template_land_doc, template_pdf)
 
-        middle_pdf = "middle.pdf"
-        print("Converting Audio file to PDF...")
-        threaded_convert(audio_transcription, middle_pdf)
-        print("Generating template...")
-        template_path = generate_template(addr, client, date_val)
-        template_pdf = "template.pdf"
-        print("Converting template to PDF...")
-        threaded_convert(template_path, template_pdf)
-        images_pdf = "images.pdf"
-        merged_pdf = "merged.pdf"
+        # 3) select image folder -> build photo index docx -> convert to PDF
+        source_folder = filedialog.askdirectory(title="Select Image Folder")
+        if not source_folder:
+            messagebox.showinfo("Cancelled", "No image folder selected.")
+            return
 
+        master_doc = build_photo_index_docx(source_folder)
+        # master_doc is already landscape
+        images_pdf = os.path.join(tempfile.gettempdir(), f"images_{int(time.time())}.pdf")
+        safe_convert_docx_to_pdf(master_doc, images_pdf)
 
-        master = Document()
-
-        images_per_page = 8
-        images_per_row = 4
-        image_width = Cm(5.85)
-        image_height = Cm(6)
-
-        master.add_paragraph().add_run().add_break(WD_BREAK.PAGE)
-        composer = Composer(master)
-
-        if os.path.exists(audio_transcription):
-            middle_doc = Document(audio_transcription)
-            composer.append(middle_doc)
-
-        temp_merged_path = os.path.join(BASE_PATH, "temp_merged.docx")
-        composer.save(temp_merged_path)
-
-        doc = Document(temp_merged_path)
-        #doc.add_page_break()
-
-        image_files = sorted([
-            f for f in os.listdir(source_folder)
-            if f.lower().endswith(('.png', '.jpg', '.jpeg'))
-        ])
-
-        photo_counter = 1
-        for start in range(0, len(image_files), images_per_page):
-            heading = doc.add_paragraph()
-            heading.alignment = WDPA.LEFT
-            heading.paragraph_format.space_after = Pt(8)
-            heading_run = heading.add_run("PHOTO INDEX")
-            heading_run.bold = True
-            heading_run.font.size = Pt(20)
-
-            table = doc.add_table(rows=4, cols=images_per_row)
-            table.autofit = True
-            for i in range(images_per_page):
-                idx = start + i
-                if idx >= len(image_files):
-                    break
-                row = (i // images_per_row) * 2
-                col = i % images_per_row
-                img_path = os.path.join(source_folder, image_files[idx])
-                img_cell = table.cell(row, col)
-                img_para = img_cell.paragraphs[0]
-                img_para.paragraph_format.space_after = Pt(0)
-                img_para.alignment = WDPA.CENTER
-                run = img_para.add_run()
-                run.add_picture(img_path, width=image_width, height=image_height)
-
-                caption_cell = table.cell(row + 1, col)
-                caption_para = caption_cell.paragraphs[0]
-                caption_para.alignment = WDPA.CENTER
-                caption_para.paragraph_format.space_before = Pt(7)
-                caption_para.paragraph_format.space_after = Pt(7)
-                caption_run = caption_para.add_run(f"Photo {photo_counter:03d}")
-                caption_run.font.size = Pt(12)
-                photo_counter += 1
-        master_doc_path = os.path.join(BASE_PATH, "master.docx")
-        master.save(master_doc_path)
-
-
-        print("Photos added to document.")
-
-        if os.path.exists(temp_merged_path):
-            os.remove(temp_merged_path)
-        if os.path.exists(output_file):
-            os.remove(output_file)
-        
-
-        print("Converting master document to PDF...")
-        threaded_convert(master_doc_path, images_pdf)
-
+        # 4) Merge PDFs in chosen order - we will merge template -> middle -> images
+        merged_pdf = os.path.join(BASE_PATH, f"final_{record_id}_{int(time.time())}.pdf")
         merger = PdfMerger()
-        merger.append(template_pdf)
-        merger.append(middle_pdf)
-        merger.append(images_pdf)
+        for pdf in (template_pdf, middle_pdf, images_pdf):
+            merger.append(pdf)
         merger.write(merged_pdf)
         merger.close()
 
+        # 5) Convert merged PDF back to DOCX
+        final_docx = os.path.join(BASE_PATH, f"final_{record_id}_{int(time.time())}.docx")
         cv = Converter(merged_pdf)
-        cv.convert(output_file, start=0, end=None)
+        cv.convert(final_docx, start=0, end=None)
         cv.close()
-        
-        doc.save(output_file)
 
-        # os.remove(template_pdf)
-        # os.remove(middle_pdf)
-        # os.remove(images_pdf)
-        # os.remove(merged_pdf)
-        # os.remove(master_doc_path)
-        # os.remove(template_path)
-
+        # 6) Update DB status and refresh view
         conn = connect_db()
         cursor = conn.cursor()
         cursor.execute("UPDATE property_records SET status = ? WHERE id = ?", ("Completed", record_id))
         conn.commit()
         conn.close()
         fetch_all()
-        messagebox.showinfo("Success", f"Photo document saved at:\n{output_file}\nStatus updated.")
+
+        # 7) Show success and open files
+        messagebox.showinfo("Success", f"Final PDF saved:\n{merged_pdf}\nFinal DOCX saved:\n{final_docx}")
         if platform.system() == "Windows":
-            os.startfile(output_file)
+            os.startfile(merged_pdf)
         elif platform.system() == "Darwin":
-            subprocess.call(["open", output_file])
+            subprocess.call(["open", merged_pdf])
         else:
-            subprocess.call(["xdg-open", output_file])
+            subprocess.call(["xdg-open", merged_pdf])
 
     except Exception as e:
-        messagebox.showerror("Error", str(e))
+        tb = traceback.format_exc()
+        messagebox.showerror("Error during paste photos", f"{str(e)}\n\n{tb}")
 
-def clear_filters():
-    fetch_all()
-    btn_clear_filters.config(state="disabled")
-
-# === GUI SETUP ===
+# ---------------- GUI Setup ----------------
 root = tk.Tk()
 root.title("InventoryHouse")
-root.configure(bg="#9ECAD6")
+root.configure(bg=APP_BG)
 root.geometry("1150x700")
 
-img = Image.open(os.path.join(BASE_PATH, "logo.png"))
-photo = ImageTk.PhotoImage(img)
-title_label = tk.Label(root, bg="#9ECAD6", image=photo)
-title_label.image = photo
-title_label.pack(pady=10)
+# header logo
+logo_path = os.path.join(BASE_PATH, "logo.png")
+if os.path.exists(logo_path):
+    try:
+        img = Image.open(logo_path)
+        photo = ImageTk.PhotoImage(img)
+        title_label = tk.Label(root, bg=APP_BG, image=photo)
+        title_label.image = photo
+        title_label.pack(pady=10)
+    except Exception:
+        title_label = tk.Label(root, text="InventoryHouse", bg=APP_BG, font=("Segoe UI", 20, "bold"))
+        title_label.pack(pady=10)
+else:
+    title_label = tk.Label(root, text="InventoryHouse", bg=APP_BG, font=("Segoe UI", 20, "bold"))
+    title_label.pack(pady=10)
 
 style = ttk.Style()
 style.theme_use('clam')
@@ -506,7 +524,7 @@ tree_frame = tk.Frame(root)
 tree_frame.pack(fill="both", expand=True, padx=10, pady=5)
 tree_y_scroll = tk.Scrollbar(tree_frame, orient="vertical")
 tree_y_scroll.pack(side="right", fill="y")
-tree_x_scroll = tk.Scrollbar(tree_frame, orient="horizontal", command=lambda *args: tree.xview(*args))
+tree_x_scroll = tk.Scrollbar(tree_frame, orient="horizontal")
 tree_x_scroll.pack(side="bottom", fill="x")
 
 tree = ttk.Treeview(tree_frame, columns=("No", "ID", "Date", "Clerk", "Address", "Client", "Type", "Status"),
@@ -539,22 +557,22 @@ tree.column("Address", width=350, anchor="center", stretch=True)
 tree.column("Client", width=100, anchor="center")
 tree.column("Type", width=70, anchor="center")
 tree.column("Status", width=90, anchor="center")
-tree.bind("<<TreeviewSelect>>", lambda e: on_row_select(e))
 
-action_frame = tk.LabelFrame(root, text="Table Actions", bg="#DFF6FF", fg="#3C5B6F", font=("Arial", 17, "bold"))
+# Actions
+action_frame = tk.LabelFrame(root, text="Table Actions", bg=ACTION_BG, fg="#3C5B6F", font=("Arial", 17, "bold"))
 action_frame.pack(fill="x", padx=10, pady=5)
-tk.Button(action_frame, text="Add Record", bg="#748DAE", fg="#2C3E50", font=("Arial", 14, "bold"), command=add_record_popup).pack(side="left", padx=5)
-tk.Button(action_frame, text="Search", bg="#748DAE", fg="#2C3E50", font=("Arial", 14, "bold"), command=search_popup).pack(side="left", padx=5)
-btn_clear_filters = tk.Button(action_frame, text="Clear Filters", state="disabled", bg="#748DAE", fg="#2C3E50", font=("Arial", 14, "bold"), command=lambda: clear_filters())
+tk.Button(action_frame, text="Add Record", bg=BTN_BG, fg=BTN_FG, font=("Arial", 14, "bold"), command=add_record_popup).pack(side="left", padx=5)
+tk.Button(action_frame, text="Search", bg=BTN_BG, fg=BTN_FG, font=("Arial", 14, "bold"), command=search_popup).pack(side="left", padx=5)
+btn_clear_filters = tk.Button(action_frame, text="Clear Filters", state="disabled", bg=BTN_BG, fg=BTN_FG, font=("Arial", 14, "bold"), command=lambda: clear_filters())
 btn_clear_filters.pack(side="left", padx=5)
 
-row_action_frame = tk.LabelFrame(root, text="Selected Row Actions", bg="#DFF6FF", fg="#3C5B6F", font=("Arial", 17, "bold"))
+row_action_frame = tk.LabelFrame(root, text="Selected Row Actions", bg=ACTION_BG, fg="#3C5B6F", font=("Arial", 17, "bold"))
 row_action_frame.pack(fill="x", padx=10, pady=5)
-btn_edit = tk.Button(row_action_frame, text="Edit", state="disabled", bg="#748DAE", fg="#2C3E50", font=("Arial", 14, "bold"))
+btn_edit = tk.Button(row_action_frame, text="Edit", state="disabled", bg=BTN_BG, fg=BTN_FG, font=("Arial", 14, "bold"))
 btn_edit.pack(side="left", padx=5)
-btn_delete = tk.Button(row_action_frame, text="Delete", state="disabled", bg="#748DAE", fg="#2C3E50", font=("Arial", 14, "bold"))
+btn_delete = tk.Button(row_action_frame, text="Delete", state="disabled", bg=BTN_BG, fg=BTN_FG, font=("Arial", 14, "bold"))
 btn_delete.pack(side="left", padx=5)
-btn_photos = tk.Button(row_action_frame, text="Paste Photos", state="disabled", bg="#748DAE", fg="#2C3E50", font=("Arial", 14, "bold"))
+btn_photos = tk.Button(row_action_frame, text="Paste Photos", state="disabled", bg=BTN_BG, fg=BTN_FG, font=("Arial", 14, "bold"))
 btn_photos.pack(side="left", padx=5)
 
 selected_record = None
@@ -564,7 +582,7 @@ def on_row_select(event):
     if selected_item:
         selected_record = tree.item(selected_item[0])['values']
         btn_edit.config(state="normal", command=lambda: open_edit_popup(selected_record))
-        if selected_record[7].lower() == "completed":
+        if str(selected_record[7]).strip().lower() == "completed":
             btn_photos.config(state="disabled")
         else:
             btn_photos.config(state="normal", command=lambda: paste_photos(selected_record[1]))
@@ -577,7 +595,13 @@ def reset_action_buttons():
     btn_delete.config(state="disabled")
     btn_photos.config(state="disabled")
 
-# Start App
+tree.bind("<<TreeviewSelect>>", lambda e: on_row_select(e))
+
+def clear_filters():
+    fetch_all()
+    btn_clear_filters.config(state="disabled")
+
+# ---------------- Start App ----------------
 create_table()
 fetch_all()
 root.mainloop()
