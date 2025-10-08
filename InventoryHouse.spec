@@ -5,7 +5,7 @@ a = Analysis(
     ['InventoryHouse.py'],
     pathex=[],
     binaries=[],
-    datas=[('C:\\Users\\Tanveer\\AppData\\Roaming\\Python\\Python313\\site-packages\\docxcompose\\templates\\custom.xml', 'docxcompose/templates'), ('image 1.png', '.'), ('logo.png', '.'), ('inventory.db', '.')],
+    datas=[('C:\\Users\\Tanveer\\AppData\\Roaming\\Python\\Python313\\site-packages\\docxcompose\\templates\\custom.xml', 'docxcompose/templates'), ('image 1.png', '.'), ('logo.png', '.')],
     hiddenimports=[],
     hookspath=[],
     hooksconfig={},
