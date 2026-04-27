@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InventoryHouse Pro</title>
+    <link rel="stylesheet" href="styles/main.css">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="logo-container">
+                <img src="../../assets/logo.png" alt="InventoryHouse" class="app-logo" onerror="this.style.display='none'">
+                <h1 class="app-title">InventoryHouse Pro</h1>
+            </div>
+            <div class="header-actions">
+                <span id="connection-status" class="status-indicator offline">Offline</span>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Table Container -->
+            <div class="table-container">
+                <table id="records-table" class="data-table">
+                    <thead>
+                        <tr>
+                            <th class="col-no">No</th>
+                            <th class="col-date">Date</th>
+                            <th class="col-clerk">Clerk</th>
+                            <th class="col-address">Address</th>
+                            <th class="col-client">Client</th>
+                            <th class="col-type">Type</th>
+                            <th class="col-status">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="records-tbody">
+                        <!-- Records will be loaded here -->
+                    </tbody>
+                </table>
+                <div id="empty-state" class="empty-state" style="display: none;">
+                    <p>No records found. Add your first record to get started.</p>
+                </div>
+            </div>
+
+            <!-- Action Panels -->
+            <div class="action-panels">
+                <!-- Table Actions -->
+                <div class="panel panel-table-actions">
+                    <h3 class="panel-title">Table Actions</h3>
+                    <div class="button-group">
+                        <button id="btn-add" class="btn btn-primary">
+                            <span class="btn-icon">+</span> Add Record
+                        </button>
+                        <button id="btn-search" class="btn btn-secondary">
+                            <span class="btn-icon">🔍</span> Search
+                        </button>
+                        <button id="btn-clear" class="btn btn-secondary" disabled>
+                            <span class="btn-icon">✕</span> Clear Filters
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Row Actions -->
+                <div class="panel panel-row-actions">
+                    <h3 class="panel-title">Selected Row Actions</h3>
+                    <div class="button-group">
+                        <button id="btn-edit" class="btn btn-warning" disabled>
+                            <span class="btn-icon">✎</span> Edit
+                        </button>
+                        <button id="btn-delete" class="btn btn-danger" disabled>
+                            <span class="btn-icon">🗑</span> Delete
+                        </button>
+                        <button id="btn-paste-photos" class="btn btn-success" disabled>
+                            <span class="btn-icon">📷</span> Paste Photos
+                        </button>
+                    </div>
+                    <div id="selected-info" class="selected-info">
+                        No record selected
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Modal: Add/Edit Record -->
+    <div id="modal-record" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modal-title">Add Record</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="record-form">
+                    <input type="hidden" id="record-id">
+                    
+                    <div class="form-group">
+                        <label for="clerk">Clerk</label>
+                        <select id="clerk" name="clerk" required>
+                            <option value="">Select Clerk</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="address">Property Address</label>
+                        <input type="text" id="address" name="property_address" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="client">Client</label>
+                        <input type="text" id="client" name="client" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="inv-type">Inventory Type</label>
+                        <input type="text" id="inv-type" name="inv_type" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="status">Status</label>
+                        <select id="status" name="status" required>
+                            <option value="">Select Status</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+                <button type="submit" form="record-form" class="btn btn-primary">Save</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Search -->
+    <div id="modal-search" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Search Records</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <form id="search-form">
+                    <div class="form-group">
+                        <label for="search-client">Client</label>
+                        <input type="text" id="search-client" name="client">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="search-clerk">Clerk</label>
+                        <select id="search-clerk" name="clerk">
+                            <option value="">Any Clerk</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="search-address">Address</label>
+                        <input type="text" id="search-address" name="address">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="search-status">Status</label>
+                        <select id="search-status" name="status">
+                            <option value="">Any Status</option>
+                        </select>
+                    </div>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+                <button type="submit" form="search-form" class="btn btn-primary">Search</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: Paste Photos -->
+    <div id="modal-photos" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>Generate Report</h2>
+                <button class="modal-close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="workflow-steps">
+                    <div class="step">
+                        <div class="step-number">1</div>
+                        <div class="step-content">
+                            <h4>Select Transcription Document</h4>
+                            <p>Choose the middle Word document (audio transcribed)</p>
+                            <button id="btn-select-doc" class="btn btn-secondary">Browse...</button>
+                            <span id="doc-path" class="file-path">No file selected</span>
+                        </div>
+                    </div>
+
+                    <div class="step">
+                        <div class="step-number">2</div>
+                        <div class="step-content">
+                            <h4>Select Photos Folder</h4>
+                            <p>Choose the folder containing property images</p>
+                            <button id="btn-select-photos" class="btn btn-secondary">Browse...</button>
+                            <span id="photos-path" class="file-path">No folder selected</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="generation-status" class="generation-status" style="display: none;">
+                    <div class="spinner"></div>
+                    <p>Generating report... Please wait.</p>
+                </div>
+
+                <div id="generation-result" class="generation-result" style="display: none;">
+                    <div class="success-icon">✓</div>
+                    <p>Report generated successfully!</p>
+                    <p id="result-path" class="result-path"></p>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary modal-cancel">Cancel</button>
+                <button id="btn-generate" class="btn btn-success" disabled>Generate Report</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="spinner"></div>
+        <p>Loading...</p>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/app.js"></script>
+</body>
+</html>

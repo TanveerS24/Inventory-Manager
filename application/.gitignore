@@ -4,15 +4,16 @@ __pycache__/
 *$py.class
 *.so
 .Python
-build/
 *.egg-info/
 dist/
-_internal/
+build/
 
-# PyInstaller
-*.spec
+# Virtual environments
+venv/
+env/
+ENV/
 
-# Database (data files, not source)
+# Database
 *.db
 *.sqlite
 *.sqlite3
@@ -20,6 +21,16 @@ _internal/
 # Environment variables
 .env
 .env.local
+
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Electron
+/dist
+/out
 
 # IDE
 .vscode/
@@ -35,8 +46,9 @@ desktop.ini
 
 # Logs
 *.log
+logs/
 
-# Temp files
+# Temporary files
 temp/
 tmp/
 *.tmp

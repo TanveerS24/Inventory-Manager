@@ -1,0 +1,23 @@
+/* Status Badge Styles */
+.status-badge {
+    display: inline-block;
+    padding: 4px 10px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 500;
+}
+
+.status-badge.inspected {
+    background: #9ECAD6;
+    color: #2C3E50;
+}
+
+.status-badge.audio-recorded {
+    background: #f39c12;
+    color: white;
+}
+
+.status-badge.completed {
+    background: #27ae60;
+    color: white;
+}

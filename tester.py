@@ -199,7 +199,7 @@ def build_photo_index_docx(source_folder, out_path=None, images_per_page=8, imag
     set_doc_landscape(doc)
 
     image_width = Cm(5.85)
-    image_height = Cm(6)
+    image_height = Cm(6.11)
     photo_counter = 1
 
     for start in range(0, len(image_files), images_per_page):
@@ -214,7 +214,6 @@ def build_photo_index_docx(source_folder, out_path=None, images_per_page=8, imag
         rows_needed = (min(images_per_page, len(image_files) - start) + images_per_row - 1) // images_per_row
         table = doc.add_table(rows=rows_needed * 2, cols=images_per_row)
         table.autofit = True
-        add_table_borders(table)
 
         for i in range(min(images_per_page, len(image_files) - start)):
             global_index = start + i
@@ -459,21 +458,25 @@ def paste_photos(record_id):
         images_pdf = os.path.join(tempfile.gettempdir(), f"images_{int(time.time())}.pdf")
         safe_convert_docx_to_pdf(master_doc, images_pdf)
 
-        # 4) Merge PDFs in chosen order - we will merge template -> middle -> images
-        merged_pdf = os.path.join(BASE_PATH, f"final_{record_id}_{int(time.time())}.pdf")
+        # 4) Merge PDFs
+        merged_pdf = os.path.join(tempfile.gettempdir(), f"merged_{record_id}_{int(time.time())}.pdf")
         merger = PdfMerger()
         for pdf in (template_pdf, middle_pdf, images_pdf):
             merger.append(pdf)
         merger.write(merged_pdf)
         merger.close()
 
-        # 5) Convert merged PDF back to DOCX
-        final_docx = os.path.join(BASE_PATH, f"final_{record_id}_{int(time.time())}.docx")
+        # 5) Convert merged PDF -> DOCX and save in photo folder
+        final_docx = os.path.join(source_folder, f"final_{record_id}_{int(time.time())}.docx")
         cv = Converter(merged_pdf)
         cv.convert(final_docx, start=0, end=None)
         cv.close()
 
-        # 6) Update DB status and refresh view
+        # Remove merged PDF
+        if os.path.exists(merged_pdf):
+            os.remove(merged_pdf)
+
+        # 6) Update DB status
         conn = connect_db()
         cursor = conn.cursor()
         cursor.execute("UPDATE property_records SET status = ? WHERE id = ?", ("Completed", record_id))
@@ -481,14 +484,14 @@ def paste_photos(record_id):
         conn.close()
         fetch_all()
 
-        # 7) Show success and open files
-        messagebox.showinfo("Success", f"Final PDF saved:\n{merged_pdf}\nFinal DOCX saved:\n{final_docx}")
+        # 7) Show success and open final docx
+        messagebox.showinfo("Success", f"Final document saved:\n{final_docx}")
         if platform.system() == "Windows":
-            os.startfile(merged_pdf)
+            os.startfile(final_docx)
         elif platform.system() == "Darwin":
-            subprocess.call(["open", merged_pdf])
+            subprocess.call(["open", final_docx])
         else:
-            subprocess.call(["xdg-open", merged_pdf])
+            subprocess.call(["xdg-open", final_docx])
 
     except Exception as e:
         tb = traceback.format_exc()
