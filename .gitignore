@@ -40,3 +40,13 @@ desktop.ini
 temp/
 tmp/
 *.tmp
+
+# Application specific
+application/backend/venv/
+application/backend/__pycache__/
+application/backend/*.pyc
+application/frontend/node_modules/
+application/frontend/dist/
+application/frontend/build/
+application/frontend/out/
+application/*.db
